@@ -42,52 +42,61 @@ class AlbumCardShimmer extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return SizedBox(
-      width: size,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Shimmer.fromColors(
-            baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
-            highlightColor:
-                isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
-            child: Container(
-              width: size,
-              height: size,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(10),
+      width: size.isFinite ? size : null,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final resolvedSize = size.isFinite
+              ? size
+              : constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : 160.0;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Shimmer.fromColors(
+                baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
+                highlightColor:
+                    isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
+                child: Container(
+                  width: resolvedSize,
+                  height: resolvedSize,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Shimmer.fromColors(
-            baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
-            highlightColor:
-                isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
-            child: Container(
-              width: size * 0.8,
-              height: 14,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
+              const SizedBox(height: 8),
+              Shimmer.fromColors(
+                baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
+                highlightColor:
+                    isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
+                child: Container(
+                  width: resolvedSize * 0.8,
+                  height: 14,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Shimmer.fromColors(
-            baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
-            highlightColor:
-                isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
-            child: Container(
-              width: size * 0.6,
-              height: 12,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(4),
+              const SizedBox(height: 4),
+              Shimmer.fromColors(
+                baseColor: isDark ? AppTheme.darkCard : const Color(0xFFE0E0E0),
+                highlightColor:
+                    isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
+                child: Container(
+                  width: resolvedSize * 0.6,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
               ),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       ),
     );
   }

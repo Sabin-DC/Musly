@@ -33,6 +33,7 @@ class AlbumArtView extends StatelessWidget {
             child: Image(
               image: image,
               fit: BoxFit.contain,
+              gaplessPlayback: true,
               errorBuilder: (context, error, stackTrace) => Container(
                 width: 250,
                 height: 250,

@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' show Random;
+import 'dart:ui' as ui;
 
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -29,6 +30,7 @@ import '../services/jukebox_service.dart';
 import '../services/audio_handler.dart';
 import '../services/fade_settings_service.dart';
 import '../services/crossfade_service.dart';
+import '../utils/album_cover_art.dart';
 
 import '../services/transcoding_service.dart';
 
@@ -80,6 +82,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       (_castService.isConnected || _upnpService.isConnected);
 
   String? _resolvedArtworkUrl;
+  String? _systemArtworkUrl;
 
   RadioStation? _currentRadioStation;
   bool _isPlayingRadio = false;
@@ -837,14 +840,81 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_resolvedArtworkUrl != null && _currentSong?.id == song.id) {
       return _resolvedArtworkUrl;
     }
-    if (song.coverArt != null && song.coverArt!.isNotEmpty) {
-      if (song.coverArt!.startsWith('/') ||
-          (song.coverArt!.length > 2 && song.coverArt![1] == ':')) {
-        return Uri.file(song.coverArt!).toString();
+    final coverArt = resolveAlbumCoverArt(_libraryProvider, song);
+    if (coverArt != null && coverArt.isNotEmpty) {
+      if (coverArt.startsWith('/') ||
+          (coverArt.length > 2 && coverArt[1] == ':')) {
+        return Uri.file(coverArt).toString();
       }
-      return _subsonicService.getCoverArtUrl(song.coverArt, size: 800);
+      return _subsonicService.getCoverArtUrl(coverArt, size: 800);
     }
     return _subsonicService.getCoverArtUrl(song.id, size: 800);
+  }
+
+  /// iOS renders lock-screen artwork directly from [MediaItem.artUri], unlike
+  /// Flutter's in-app artwork widgets which crop it with `BoxFit.cover`.
+  /// Generate a square, centre-cropped file so non-square source artwork is
+  /// never stretched in the system player.
+  Future<void> _refreshSystemArtwork() async {
+    final song = _currentSong;
+    final sourceUrl = _resolveArtworkUrl();
+    if (song == null || sourceUrl == null || sourceUrl.isEmpty) {
+      _systemArtworkUrl = null;
+      return;
+    }
+
+    try {
+      final sourceUri = Uri.tryParse(sourceUrl);
+      final sourceFile = sourceUri?.scheme == 'file'
+          ? File.fromUri(sourceUri!)
+          : await DefaultCacheManager().getSingleFile(sourceUrl);
+      if (!await sourceFile.exists()) return;
+
+      final sourceBytes = await sourceFile.readAsBytes();
+      final codec = await ui.instantiateImageCodec(sourceBytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final cropSize = image.width < image.height ? image.width : image.height;
+      final offsetX = (image.width - cropSize) / 2;
+      final offsetY = (image.height - cropSize) / 2;
+      const outputSize = 800;
+      final recorder = ui.PictureRecorder();
+      final canvas = ui.Canvas(recorder);
+      canvas.drawImageRect(
+        image,
+        ui.Rect.fromLTWH(
+            offsetX, offsetY, cropSize.toDouble(), cropSize.toDouble()),
+        const ui.Rect.fromLTWH(0, 0, 800, 800),
+        ui.Paint()..filterQuality = ui.FilterQuality.high,
+      );
+      final squareImage = await recorder.endRecording().toImage(
+            outputSize,
+            outputSize,
+          );
+      final pngBytes =
+          await squareImage.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      squareImage.dispose();
+      if (pngBytes == null || _currentSong?.id != song.id) return;
+
+      final artworkDirectory = Directory(
+        '${(await getTemporaryDirectory()).path}/musly_system_artwork',
+      );
+      if (!await artworkDirectory.exists()) {
+        await artworkDirectory.create(recursive: true);
+      }
+      final artworkFile = File(
+        '${artworkDirectory.path}/${sourceUrl.hashCode.abs()}.png',
+      );
+      await artworkFile.writeAsBytes(pngBytes.buffer.asUint8List(),
+          flush: true);
+      if (_currentSong?.id != song.id) return;
+
+      _systemArtworkUrl = Uri.file(artworkFile.path).toString();
+      _updateAndroidAuto();
+    } catch (_) {
+      // Keep the original URI as a fallback when an image cannot be decoded.
+    }
   }
 
   String? _resolveArtworkUrl() {
@@ -938,7 +1008,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _updateAndroidAuto() {
     if (_currentSong == null) return;
 
-    final artworkUrl = _resolveArtworkUrl();
+    final artworkUrl = _systemArtworkUrl ?? _resolveArtworkUrl();
 
     final effectiveDuration = _duration.inMilliseconds > 0
         ? _duration
@@ -1107,8 +1177,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     if (nextSong.coverArt != null && nextSong.coverArt!.isNotEmpty) {
-      final coverUrl =
-          _subsonicService.getCoverArtUrl(nextSong.coverArt, size: 800);
+      final coverUrl = _playerArtworkUrl(nextSong);
       if (coverUrl.isNotEmpty) {
         try {
           final provider = CachedNetworkImageProvider(coverUrl);
@@ -1119,13 +1188,47 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
                 ),
               );
           DefaultCacheManager()
-              .downloadFile(coverUrl, key: '${nextSong.coverArt}_800')
+              .downloadFile(coverUrl, key: coverUrl)
               .catchError((_) => null as dynamic);
         } catch (_) {}
       }
     }
 
     _checkAndRefillAutoQueue().catchError((_) {});
+  }
+
+  String _playerArtworkUrl(Song song) {
+    final coverArt = resolveAlbumCoverArt(_libraryProvider, song);
+    return _subsonicService.getCoverArtUrl(coverArt, size: 600);
+  }
+
+  void _precachePlayerArtwork(Song song) {
+    final coverUrl = _playerArtworkUrl(song);
+    if (coverUrl.isEmpty) return;
+    try {
+      CachedNetworkImageProvider(coverUrl)
+          .resolve(ImageConfiguration.empty)
+          .addListener(
+            ImageStreamListener(
+              (_, __) {},
+              onError: (dynamic _, StackTrace? __) {},
+            ),
+          );
+      final thumbnailUrl = _subsonicService.getCoverArtUrl(
+        resolveAlbumCoverArt(_libraryProvider, song),
+        size: 128,
+      );
+      if (thumbnailUrl.isNotEmpty) {
+        CachedNetworkImageProvider(thumbnailUrl)
+            .resolve(ImageConfiguration.empty)
+            .addListener(
+              ImageStreamListener(
+                (_, __) {},
+                onError: (dynamic _, StackTrace? __) {},
+              ),
+            );
+      }
+    } catch (_) {}
   }
 
   double get progress {
@@ -1803,6 +1906,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentSong = song;
       _lastPreloadedSongId = null;
       _resolvedArtworkUrl = _resolveInitialArtworkUrl(song);
+      _systemArtworkUrl = null;
+      _precachePlayerArtwork(song);
       _position = Duration.zero;
 
       _resetScrobbleTracking(song);
@@ -1811,7 +1916,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       _updateAndroidAuto();
 
-      _refreshArtworkUrl().catchError((_) {});
+      _refreshArtworkUrl()
+          .whenComplete(() => _refreshSystemArtwork().catchError((_) {}));
 
       Timer(const Duration(milliseconds: 1200), () {
         final next = _getNextSongToPreload();
@@ -1942,7 +2048,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         return;
       } else {
-
         final youtubeSource = song.isLocal != true
             ? await _subsonicService.getYoutubeAudioSource(song)
             : null;
@@ -2996,6 +3101,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _lastPreloadedSongId = null;
     _position = Duration.zero;
     _resolvedArtworkUrl = null;
+    _systemArtworkUrl = null;
 
     _resetScrobbleTracking(_currentSong!);
     notifyListeners();
@@ -3014,6 +3120,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     await _refreshArtworkUrl();
+    await _refreshSystemArtwork();
     if (_currentSong != null) {
       await _applyReplayGain(_currentSong);
     }
@@ -3402,6 +3509,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   bool _upnpWasConnected = false;
   bool _upnpWasPlaying = false;
+
   /// Canonical URIs of the track the renderer is playing and the one pre-queued
   /// via SetNextAVTransportURI. Canonical because renderers echo URIs back with
   /// different escaping than we sent — see [UpnpService.canonicalUri].

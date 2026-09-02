@@ -20,3 +20,4 @@ export 'ytdlp_service.dart';
 export 'lrclib_service.dart';
 export 'playlist_cover_service.dart';
 export 'translation_ota_service.dart';
+export 'album_collection_service.dart';

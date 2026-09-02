@@ -10,14 +10,20 @@ class AlbumCard extends StatefulWidget {
   final Album album;
   final double size;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final VoidCallback? onPlayPressed;
+  final bool selectionMode;
+  final bool selected;
 
   const AlbumCard({
     super.key,
     required this.album,
     this.size = 160,
     this.onTap,
+    this.onLongPress,
     this.onPlayPressed,
+    this.selectionMode = false,
+    this.selected = false,
   });
 
   @override
@@ -38,6 +44,7 @@ class _AlbumCardState extends State<AlbumCard> {
         onExit: (_) => setState(() => _isHovered = false),
         child: GestureDetector(
           onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
           child: SizedBox(
             width: widget.size,
             child: Column(
@@ -68,6 +75,38 @@ class _AlbumCardState extends State<AlbumCard> {
                           size: widget.size,
                           borderRadius: 8,
                         ),
+                        if (widget.selectionMode)
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: widget.selected
+                                    ? Colors.black.withValues(alpha: 0.35)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(8),
+                                border: widget.selected
+                                    ? Border.all(
+                                        color: theme.colorScheme.primary,
+                                        width: 3,
+                                      )
+                                    : null,
+                              ),
+                            ),
+                          ),
+                        if (widget.selectionMode)
+                          Positioned(
+                            top: 8,
+                            right: 8,
+                            child: Icon(
+                              widget.selected
+                                  ? CupertinoIcons.checkmark_circle_fill
+                                  : CupertinoIcons.circle,
+                              color: widget.selected
+                                  ? theme.colorScheme.primary
+                                  : Colors.white,
+                              size: 26,
+                              shadows: const [Shadow(blurRadius: 5)],
+                            ),
+                          ),
                         if (_isHovered && widget.onPlayPressed != null)
                           Positioned(
                             bottom: 8,

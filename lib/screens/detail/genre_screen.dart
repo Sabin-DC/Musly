@@ -7,6 +7,7 @@ import 'package:musly/providers/library_provider.dart';
 import 'package:musly/theme/app_theme.dart';
 import 'package:musly/widgets/widgets.dart';
 import 'package:musly/utils/navigation_helper.dart';
+import 'package:musly/utils/album_grid_layout.dart';
 import 'album_screen.dart';
 
 class GenreScreen extends StatefulWidget {
@@ -240,23 +241,28 @@ class _GenreScreenState extends State<GenreScreen>
         ),
       );
     }
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.75,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+    return LayoutBuilder(
+      builder: (context, constraints) => GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount:
+              AlbumGridLayout.columns(context, constraints.maxWidth),
+          childAspectRatio: 0.75,
+          crossAxisSpacing: 12,
+          mainAxisSpacing: 12,
+        ),
+        itemCount: _albums!.length,
+        itemBuilder: (context, index) {
+          final album = _albums![index];
+          return AlbumCard(
+            album: album,
+            onTap: () => NavigationHelper.push(
+              context,
+              AlbumScreen(albumId: album.id),
+            ),
+          );
+        },
       ),
-      itemCount: _albums!.length,
-      itemBuilder: (context, index) {
-        final album = _albums![index];
-        return AlbumCard(
-          album: album,
-          onTap: () =>
-              NavigationHelper.push(context, AlbumScreen(albumId: album.id)),
-        );
-      },
     );
   }
 }

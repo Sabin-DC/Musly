@@ -5,6 +5,7 @@ import '../../providers/library_provider.dart';
 import '../../services/offline_service.dart';
 import '../../widgets/widgets.dart';
 import '../../l10n/app_localizations.dart';
+import '../../utils/album_grid_layout.dart';
 import '../detail/album_screen.dart';
 
 class DownloadsScreen extends StatefulWidget {
@@ -132,12 +133,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        int crossAxisCount = 2;
-        if (constraints.maxWidth > 900) {
-          crossAxisCount = 5;
-        } else if (constraints.maxWidth > 600) {
-          crossAxisCount = 3;
-        }
+        final crossAxisCount =
+            AlbumGridLayout.columns(context, constraints.maxWidth);
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 150),

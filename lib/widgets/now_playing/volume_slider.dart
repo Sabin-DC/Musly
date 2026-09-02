@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:volume_controller/volume_controller.dart';
@@ -15,6 +18,11 @@ class _VolumeSliderState extends State<VolumeSlider> {
   double _dragValue = 0.0;
   double _systemVolume = 0.0;
 
+  // volume_controller deactivates the shared AVAudioSession when its event
+  // listener is removed on iOS. Disposing the now-playing sheet would then be
+  // reported as an interruption and PlayerProvider would fade playback out.
+  bool get _canListenToSystemVolume => !kIsWeb && !Platform.isIOS;
+
   @override
   void initState() {
     super.initState();
@@ -22,16 +30,20 @@ class _VolumeSliderState extends State<VolumeSlider> {
     VolumeController.instance.getVolume().then((volume) {
       if (mounted) setState(() => _systemVolume = volume);
     });
-    VolumeController.instance.addListener((volume) {
-      if (mounted && !_isDragging) {
-        setState(() => _systemVolume = volume);
-      }
-    });
+    if (_canListenToSystemVolume) {
+      VolumeController.instance.addListener((volume) {
+        if (mounted && !_isDragging) {
+          setState(() => _systemVolume = volume);
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
-    VolumeController.instance.removeListener();
+    if (_canListenToSystemVolume) {
+      VolumeController.instance.removeListener();
+    }
     super.dispose();
   }
 

@@ -77,6 +77,18 @@ class _AnimatedEqualizerState extends State<AnimatedEqualizer>
 
   @override
   Widget build(BuildContext context) {
+    if (!widget.isPlaying) {
+      return Semantics(
+        label: 'Paused',
+        child: Icon(
+          Icons.pause_rounded,
+          key: const ValueKey('paused-song-indicator'),
+          color: widget.color,
+          size: 22,
+        ),
+      );
+    }
+
     return RepaintBoundary(
       child: Row(
         mainAxisSize: MainAxisSize.min,

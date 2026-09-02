@@ -1,4 +1,5 @@
 export 'album.dart';
+export 'album_collection.dart';
 export 'artist.dart';
 export 'artist_info.dart';
 export 'artist_ref.dart';

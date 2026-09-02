@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:musly/widgets/common/blurred_gradient_background.dart';
 import 'package:musly/widgets/now_playing/album_art_view.dart';
@@ -10,6 +12,7 @@ import 'lyrics_screen.dart';
 import 'package:musly/models/lyric_line.dart';
 import 'package:provider/provider.dart';
 import 'package:musly/providers/player_provider.dart';
+import 'package:musly/providers/library_provider.dart';
 import 'package:musly/models/song.dart';
 import 'package:musly/services/palette_service.dart';
 import 'package:musly/services/subsonic_service.dart';
@@ -22,6 +25,7 @@ import 'package:musly/widgets/common/multi_artist_widget.dart';
 import 'package:musly/services/player_ui_settings_service.dart';
 import 'package:musly/l10n/app_localizations.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:musly/utils/album_cover_art.dart';
 
 class NowPlayingScreen extends StatefulWidget {
   final ImageProvider image;
@@ -43,6 +47,47 @@ class NowPlayingScreen extends StatefulWidget {
     this.topPadding = 0.0,
   });
 
+  static bool _isOpen = false;
+
+  static bool get isOpen => _isOpen;
+
+  static Future<void> show(BuildContext context, Song song) async {
+    if (_isOpen) return;
+    final subsonic = Provider.of<SubsonicService>(context, listen: false);
+    final coverArt = resolveAlbumCoverArt(
+      Provider.of<LibraryProvider>(context, listen: false),
+      song,
+    );
+    final coverUrl =
+        coverArt != null ? subsonic.getCoverArtUrl(coverArt, size: 600) : null;
+    final image = coverUrl != null && coverUrl.isNotEmpty
+        ? CachedNetworkImageProvider(coverUrl) as ImageProvider
+        : const AssetImage('assets/logo.png') as ImageProvider;
+
+    _isOpen = true;
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useRootNavigator: true,
+        backgroundColor: Colors.transparent,
+        constraints: const BoxConstraints(maxWidth: double.infinity),
+        builder: (_) => NowPlayingScreen(
+          topPadding: MediaQuery.paddingOf(context).top,
+          image: image,
+          title: song.title,
+          artist: song.artistParticipants?.isNotEmpty == true
+              ? song.artistParticipants!.map((artist) => artist.name).join(', ')
+              : song.artist ?? '',
+          heroTag: 'cover_${song.id}',
+          song: song,
+        ),
+      );
+    } finally {
+      _isOpen = false;
+    }
+  }
+
   @override
   State<NowPlayingScreen> createState() => _NowPlayingScreenState();
 }
@@ -55,6 +100,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
   bool _isLoadingLyrics = true;
   Song? _lastSong;
   ImageProvider? _currentImageProvider;
+  Timer? _deferredDetailsTimer;
 
   @override
   void initState() {
@@ -63,8 +109,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
     _fetchedLyrics = widget.lyrics;
     _currentImageProvider = widget.image;
     _lastSong = widget.song;
-    _extractColors();
-    _fetchLyrics();
+    _deferPlayerDetails();
   }
 
   @override
@@ -75,22 +120,36 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
         _lastSong?.id != provider.currentSong?.id) {
       _lastSong = provider.currentSong;
       _updateImageProviderAndColors();
-      _fetchLyrics();
+      _deferPlayerDetails();
     }
+  }
+
+  void _deferPlayerDetails() {
+    // Palette generation decodes the full cover image on the UI isolate. Keep
+    // it out of the bottom-sheet transition so a first-time player expansion
+    // remains smooth even when the album art is not cached yet.
+    _deferredDetailsTimer?.cancel();
+    _deferredDetailsTimer = Timer(const Duration(milliseconds: 280), () {
+      if (!mounted) return;
+      _extractColors();
+      _fetchLyrics();
+    });
   }
 
   Future<void> _updateImageProviderAndColors() async {
     if (_lastSong == null) return;
     final subsonic = Provider.of<SubsonicService>(context, listen: false);
-    final coverUrl = _lastSong!.coverArt != null
-        ? subsonic.getCoverArtUrl(_lastSong!.coverArt, size: 600)
-        : null;
+    final coverArt = resolveAlbumCoverArt(
+      Provider.of<LibraryProvider>(context, listen: false),
+      _lastSong!,
+    );
+    final coverUrl =
+        coverArt != null ? subsonic.getCoverArtUrl(coverArt, size: 600) : null;
     if (coverUrl != null && coverUrl.isNotEmpty) {
       _currentImageProvider = CachedNetworkImageProvider(coverUrl);
     } else {
       _currentImageProvider = const AssetImage('assets/logo.png');
     }
-    _extractColors();
   }
 
   Future<void> _fetchLyrics() async {
@@ -180,6 +239,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen> {
 
   @override
   void dispose() {
+    _deferredDetailsTimer?.cancel();
     _pageController.dispose();
     super.dispose();
   }

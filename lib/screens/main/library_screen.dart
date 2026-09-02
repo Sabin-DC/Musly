@@ -1,16 +1,20 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 import 'package:musly/providers/providers.dart';
 import 'package:musly/services/subsonic_service.dart';
 import 'package:musly/theme/app_theme.dart';
 import 'package:musly/widgets/common/album_artwork.dart';
 import 'package:musly/utils/navigation_helper.dart';
+import 'package:musly/utils/album_grid_layout.dart';
+import 'package:musly/utils/responsive_scroll_physics.dart';
 import 'package:musly/screens/detail/album_screen.dart';
 import 'package:musly/screens/detail/playlist_screen.dart';
 import 'package:musly/screens/media/favorites_screen.dart';
 import 'package:musly/screens/media/album_collection_screen.dart';
+import 'package:musly/screens/media/collections_screen.dart';
 import 'library_search_delegate.dart';
 import 'package:musly/screens/detail/artist_screen.dart';
 import 'package:musly/screens/media/radio_screen.dart';
@@ -22,6 +26,7 @@ import 'package:musly/widgets/common/playlist_artwork.dart';
 import 'package:musly/screens/settings/settings_screen.dart';
 import 'package:musly/models/playlist.dart';
 import 'package:musly/models/album.dart';
+import 'package:musly/models/album_collection.dart';
 import 'package:musly/models/artist.dart';
 import 'package:musly/models/song.dart';
 
@@ -44,6 +49,8 @@ enum _LibraryItemType {
   downloadedSongs,
   radioStations,
   likedAlbums,
+  albumBrowser,
+  collections,
   playlist,
   album,
   artist,
@@ -93,71 +100,103 @@ class _LibraryScreenState extends State<LibraryScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 36,
-              height: 4,
-              margin: const EdgeInsets.only(bottom: 16),
-              decoration: BoxDecoration(
-                color: isDark ? Colors.white24 : Colors.black12,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            ListTile(
-              leading: Container(
-                width: 40,
-                height: 40,
+      builder: (ctx) => Material(
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
                 decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .primary
-                      .withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
+                  color: isDark ? Colors.white24 : Colors.black12,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                child: Icon(CupertinoIcons.music_note_list,
-                    color: Theme.of(context).colorScheme.primary, size: 22),
               ),
-              title: Text(AppLocalizations.of(context)!.createPlaylist,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  AppLocalizations.of(context)!.createPlaylistSubtitle,
-                  style: const TextStyle(fontSize: 12)),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showCreatePlaylistDialog(context);
-              },
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF6366F1).withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(CupertinoIcons.music_note_list,
+                      color: Theme.of(context).colorScheme.primary, size: 22),
                 ),
-                child: const Icon(Icons.dns_rounded,
-                    color: Color(0xFF6366F1), size: 22),
+                title: Text(AppLocalizations.of(context)!.createPlaylist,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                    AppLocalizations.of(context)!.createPlaylistSubtitle,
+                    style: const TextStyle(fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showCreatePlaylistDialog(context);
+                },
               ),
-              title: Text(AppLocalizations.of(context)!.addMusicSource,
-                  style: const TextStyle(fontWeight: FontWeight.bold)),
-              subtitle: Text(
-                  AppLocalizations.of(context)!.addMusicSourceSubtitle,
-                  style: const TextStyle(fontSize: 12)),
-              onTap: () {
-                Navigator.pop(ctx);
-                NavigationHelper.push(context, const AddServerScreen());
-              },
-            ),
-          ],
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFAF52DE).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(CupertinoIcons.square_stack_3d_up_fill,
+                      color: Color(0xFFAF52DE), size: 22),
+                ),
+                title: const Text('Create collection',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: const Text('Group albums together',
+                    style: TextStyle(fontSize: 12)),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final details = await showCollectionEditor(context);
+                  if (details == null || !context.mounted) return;
+                  final collection = await context
+                      .read<AlbumCollectionService>()
+                      .create(details.name, description: details.description);
+                  if (context.mounted) {
+                    _navigate(
+                      context,
+                      CollectionDetailScreen(collectionId: collection.id),
+                    );
+                  }
+                },
+              ),
+              const SizedBox(height: 8),
+              ListTile(
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.dns_rounded,
+                      color: Color(0xFF6366F1), size: 22),
+                ),
+                title: Text(AppLocalizations.of(context)!.addMusicSource,
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text(
+                    AppLocalizations.of(context)!.addMusicSourceSubtitle,
+                    style: const TextStyle(fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  NavigationHelper.push(context, const AddServerScreen());
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -206,40 +245,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkSurface : Colors.white,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 36,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.black12,
-                  borderRadius: BorderRadius.circular(2),
+      builder: (ctx) => Material(
+        color: isDark ? AppTheme.darkSurface : Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: EdgeInsets.fromLTRB(16, 12, 16, bottomPadding),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.white24 : Colors.black12,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text(
-                'Sort by',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Text(
+                  'Sort by',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
-            _buildSortOptionTile(ctx, 'Recents', _SortOption.recents),
-            _buildSortOptionTile(
-                ctx, 'Recently added', _SortOption.recentlyAdded),
-            _buildSortOptionTile(ctx, 'Alphabetical', _SortOption.alphabetical),
-            _buildSortOptionTile(ctx, 'Creator', _SortOption.creator),
-          ],
+              _buildSortOptionTile(ctx, 'Recents', _SortOption.recents),
+              _buildSortOptionTile(
+                  ctx, 'Recently added', _SortOption.recentlyAdded),
+              _buildSortOptionTile(
+                  ctx, 'Alphabetical', _SortOption.alphabetical),
+              _buildSortOptionTile(ctx, 'Creator', _SortOption.creator),
+            ],
+          ),
         ),
       ),
     );
@@ -321,6 +362,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
     if ((_selectedFilter == null && !isYoutube) ||
         _selectedFilter == 'Albums') {
+      items.add(
+        _LibraryItem(
+          type: _LibraryItemType.albumBrowser,
+          title: 'All Albums',
+          subtitle: 'Browse, filter, and select albums',
+          onTap: () => _navigate(context, const AlbumsScreen()),
+        ),
+      );
       var albums = libraryProvider.recentAlbums;
       albums = _sortList(albums, (a) => a.name);
       for (final a in albums) {
@@ -348,6 +397,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
             subtitle: 'Artist',
             data: art,
             onTap: () => _navigate(context, ArtistScreen(artistId: art.id)),
+          ),
+        );
+      }
+    }
+
+    if ((_selectedFilter == null && !isYoutube) ||
+        _selectedFilter == 'Collections') {
+      var collections = <AlbumCollection>[];
+      try {
+        collections = context.read<AlbumCollectionService>().collections;
+      } catch (_) {}
+      collections = _sortList(collections, (collection) => collection.name);
+      for (final collection in collections) {
+        items.add(
+          _LibraryItem(
+            type: _LibraryItemType.collections,
+            title: collection.name,
+            subtitle:
+                '${collection.albumIds.length} ${collection.albumIds.length == 1 ? 'album' : 'albums'}',
+            data: collection,
+            onTap: () => _navigate(
+              context,
+              CollectionDetailScreen(collectionId: collection.id),
+            ),
           ),
         );
       }
@@ -430,12 +503,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return Scaffold(
       backgroundColor:
           isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
-      body: Consumer<LibraryProvider>(
-        builder: (context, libraryProvider, _) {
+      body: Consumer2<LibraryProvider, AlbumCollectionService>(
+        builder: (context, libraryProvider, _, __) {
           return CustomScrollView(
+            dragStartBehavior: DragStartBehavior.down,
             cacheExtent: 600.0,
             physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics()),
+              parent: ResponsiveBouncingScrollPhysics(),
+            ),
             slivers: [
               SliverAppBar(
                 automaticallyImplyLeading: false,
@@ -525,6 +600,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
                               'Albums',
                               AppLocalizations.of(context)?.albums ?? 'Albums',
                               isDark),
+                          const SizedBox(width: 8),
+                          _buildFilterChip(
+                              'Collections', 'Collections', isDark),
                           const SizedBox(width: 8),
                           _buildFilterChip(
                               'Artists',
@@ -762,7 +840,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       padding: EdgeInsets.symmetric(horizontal: hPad, vertical: 8),
       sliver: SliverGrid.builder(
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: _isDesktop ? 4 : 2,
+          crossAxisCount: AlbumGridLayout.columns(
+            context,
+            MediaQuery.sizeOf(context).width,
+          ),
           crossAxisSpacing: 12,
           mainAxisSpacing: 16,
           childAspectRatio: 0.78,
@@ -849,6 +930,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
           ),
           title: Text(
             item.title,
+            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          subtitle: Text(
+            item.subtitle,
+            style: const TextStyle(fontSize: 13, color: Colors.grey),
+          ),
+          onTap: item.onTap,
+        );
+
+      case _LibraryItemType.albumBrowser:
+        return _buildCollectionNavigationTile(
+          item: item,
+          icon: CupertinoIcons.music_albums_fill,
+          color: const Color(0xFF007AFF),
+        );
+
+      case _LibraryItemType.collections:
+        final collection = item.data as AlbumCollection;
+        final albums = resolveCollectionAlbums(
+          collection,
+          context.read<LibraryProvider>().cachedAllAlbums,
+        );
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(vertical: 4),
+          leading: SizedBox.square(
+            dimension: 54,
+            child: CollectionArtwork(albums: albums),
+          ),
+          title: Text(
+            collection.name,
             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -1058,6 +1171,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
           onTap: item.onTap,
         );
 
+      case _LibraryItemType.albumBrowser:
+        return _buildNavigationGridCard(
+          item: item,
+          icon: CupertinoIcons.music_albums_fill,
+          color: const Color(0xFF007AFF),
+        );
+
+      case _LibraryItemType.collections:
+        final collection = item.data as AlbumCollection;
+        return _buildGridItemCard(
+          title: collection.name,
+          subtitle: item.subtitle,
+          customArtwork: CollectionArtwork(
+            albums: resolveCollectionAlbums(
+              collection,
+              context.read<LibraryProvider>().cachedAllAlbums,
+            ),
+          ),
+          onTap: item.onTap,
+        );
+
       case _LibraryItemType.playlist:
         final playlist = item.data as Playlist;
         return _buildGridItemCard(
@@ -1142,6 +1276,49 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ],
       ),
       onTap: onTap,
+    );
+  }
+
+  Widget _buildCollectionNavigationTile({
+    required _LibraryItem item,
+    required IconData icon,
+    required Color color,
+  }) {
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+      leading: Container(
+        width: 54,
+        height: 54,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Icon(icon, color: color, size: 27),
+      ),
+      title: Text(item.title,
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+      subtitle: Text(item.subtitle,
+          style: const TextStyle(fontSize: 13, color: Colors.grey)),
+      onTap: item.onTap,
+    );
+  }
+
+  Widget _buildNavigationGridCard({
+    required _LibraryItem item,
+    required IconData icon,
+    required Color color,
+  }) {
+    return _buildGridItemCard(
+      title: item.title,
+      subtitle: item.subtitle,
+      customArtwork: Container(
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.16),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(child: Icon(icon, color: color, size: 42)),
+      ),
+      onTap: item.onTap,
     );
   }
 

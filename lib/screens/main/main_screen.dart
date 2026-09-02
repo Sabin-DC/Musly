@@ -19,6 +19,7 @@ import 'home_screen.dart';
 import 'library_screen.dart';
 import 'search_screen.dart';
 import 'package:musly/screens/media/fantasy_screen.dart';
+import 'package:musly/screens/player/now_playing_screen.dart';
 
 class PlayPauseIntent extends Intent {
   const PlayPauseIntent();
@@ -63,6 +64,9 @@ class _MainScreenState extends State<MainScreen> {
   int _currentIndex = 0;
   int _searchTapCount = 0;
   DateTime _lastSearchTap = DateTime.fromMillisecondsSinceEpoch(0);
+  PlayerProvider? _playerProvider;
+  String? _lastObservedSongId;
+  String? _autoExpandedAlbumId;
 
   final List<Widget> _screens = const [
     HomeScreen(),
@@ -72,6 +76,7 @@ class _MainScreenState extends State<MainScreen> {
 
   @override
   void dispose() {
+    _playerProvider?.removeListener(_handlePlaybackChange);
     UsageTimeService().disposeService();
     super.dispose();
   }
@@ -94,6 +99,8 @@ class _MainScreenState extends State<MainScreen> {
         context,
         listen: false,
       );
+      _playerProvider = playerProvider;
+      playerProvider.addListener(_handlePlaybackChange);
       final recommendationService = Provider.of<RecommendationService>(
         context,
         listen: false,
@@ -137,6 +144,32 @@ class _MainScreenState extends State<MainScreen> {
       Future.delayed(const Duration(seconds: 2), () {
         if (mounted) _checkForUpdate();
       });
+    });
+  }
+
+  void _handlePlaybackChange() {
+    final player = _playerProvider;
+    final song = player?.currentSong;
+    if (!mounted || song == null || song.id == _lastObservedSongId) return;
+    _lastObservedSongId = song.id;
+
+    final albumId = song.albumId?.isNotEmpty == true
+        ? song.albumId!
+        : song.album?.isNotEmpty == true
+            ? '${song.album}|${song.artist ?? ''}'
+            : null;
+    if (albumId == null || albumId == _autoExpandedAlbumId) {
+      return;
+    }
+    _autoExpandedAlbumId = albumId;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _playerProvider?.currentSong?.id != song.id ||
+          NowPlayingScreen.isOpen) {
+        return;
+      }
+      NowPlayingScreen.show(context, song);
     });
   }
 

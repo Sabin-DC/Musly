@@ -5,6 +5,7 @@ import '../../services/subsonic_service.dart';
 import '../../services/offline_service.dart';
 import '../../providers/player_provider.dart';
 import '../../utils/navigation_helper.dart';
+import '../../utils/album_grid_layout.dart';
 import '../../widgets/widgets.dart';
 import '../../l10n/app_localizations.dart';
 import '../detail/album_screen.dart';
@@ -269,12 +270,8 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        int crossAxisCount = 2;
-        if (constraints.maxWidth > 900) {
-          crossAxisCount = 5;
-        } else if (constraints.maxWidth > 600) {
-          crossAxisCount = 3;
-        }
+        final crossAxisCount =
+            AlbumGridLayout.columns(context, constraints.maxWidth);
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 150),

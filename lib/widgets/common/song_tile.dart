@@ -48,20 +48,24 @@ class SongTile extends StatelessWidget {
 
     return Consumer<PlayerProvider>(
       builder: (context, playerProvider, child) {
-        final isPlaying = playerProvider.currentSong?.id == song.id;
+        final isCurrentSong = playerProvider.currentSong?.id == song.id;
 
         final tile = ListTile(
           dense: true,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          leading: _buildLeading(context, isPlaying),
+          leading: _buildLeading(
+            context,
+            isCurrentSong,
+            playerProvider.isPlaying,
+          ),
           title: Text(
             song.title,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: isPlaying ? FontWeight.bold : FontWeight.w500,
-              color: isPlaying
+              fontWeight: isCurrentSong ? FontWeight.bold : FontWeight.w500,
+              color: isCurrentSong
                   ? theme.colorScheme.primary
                   : (isDark ? Colors.white : Colors.black87),
             ),
@@ -107,15 +111,19 @@ class SongTile extends StatelessWidget {
     );
   }
 
-  Widget? _buildLeading(BuildContext context, bool isPlaying) {
-    if (isPlaying) {
+  Widget? _buildLeading(
+    BuildContext context,
+    bool isCurrentSong,
+    bool isPlaying,
+  ) {
+    if (isCurrentSong) {
       return SizedBox(
         width: 44,
         height: 44,
         child: Center(
           child: AnimatedEqualizer(
             color: Theme.of(context).colorScheme.primary,
-            isPlaying: true,
+            isPlaying: isPlaying,
           ),
         ),
       );

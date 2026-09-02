@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/cupertino.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/album.dart';
+import '../../providers/library_provider.dart';
+import '../../services/album_collection_service.dart';
 import '../../services/subsonic_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/screen_helper.dart';
+import '../../utils/album_grid_layout.dart';
+import '../../utils/responsive_scroll_physics.dart';
 import '../../widgets/widgets.dart';
 import '../detail/album_screen.dart';
+import 'collections_screen.dart';
 
 enum AlbumCollectionType {
   recent,
@@ -21,6 +28,7 @@ class AlbumCollectionScreen extends StatefulWidget {
   final String? customTitle;
   final List<Album>? initialAlbums;
   final Future<List<Album>> Function(BuildContext context)? customFetcher;
+  final bool startInSelectionMode;
 
   const AlbumCollectionScreen({
     super.key,
@@ -28,28 +36,37 @@ class AlbumCollectionScreen extends StatefulWidget {
     this.customTitle,
     this.initialAlbums,
     this.customFetcher,
+    this.startInSelectionMode = false,
   });
 
-  const AlbumCollectionScreen.newReleases({super.key})
-      : type = AlbumCollectionType.newest,
+  const AlbumCollectionScreen.newReleases({
+    super.key,
+    this.startInSelectionMode = false,
+  })  : type = AlbumCollectionType.newest,
         customTitle = null,
         initialAlbums = null,
         customFetcher = null;
 
-  const AlbumCollectionScreen.topRated({super.key})
-      : type = AlbumCollectionType.topRated,
+  const AlbumCollectionScreen.topRated({
+    super.key,
+    this.startInSelectionMode = false,
+  })  : type = AlbumCollectionType.topRated,
         customTitle = null,
         initialAlbums = null,
         customFetcher = null;
 
-  const AlbumCollectionScreen.starred({super.key})
-      : type = AlbumCollectionType.starred,
+  const AlbumCollectionScreen.starred({
+    super.key,
+    this.startInSelectionMode = false,
+  })  : type = AlbumCollectionType.starred,
         customTitle = null,
         initialAlbums = null,
         customFetcher = null;
 
-  const AlbumCollectionScreen.recent({super.key})
-      : type = AlbumCollectionType.recent,
+  const AlbumCollectionScreen.recent({
+    super.key,
+    this.startInSelectionMode = false,
+  })  : type = AlbumCollectionType.recent,
         customTitle = null,
         initialAlbums = null,
         customFetcher = null;
@@ -66,10 +83,16 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final Set<String> _selectedAlbumIds = {};
+  final Map<String, GlobalKey> _albumKeys = {};
+  final Map<int, Offset> _pointerPositions = {};
+  bool _selecting = false;
+  String? _selectedGenre;
 
   @override
   void initState() {
     super.initState();
+    _selecting = widget.startInSelectionMode;
     if (widget.initialAlbums != null) {
       _albums = widget.initialAlbums;
       _filteredAlbums = widget.initialAlbums;
@@ -114,7 +137,15 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
             albums = starred.albums;
             break;
           case AlbumCollectionType.recent:
-            albums = await subsonic.getAlbumList(type: 'recent', size: 60);
+            final library = context.read<LibraryProvider>();
+            await library.ensureLibraryLoaded();
+            albums = List.from(library.cachedAllAlbums);
+            if (albums.isEmpty) {
+              albums = await subsonic.getAlbumList(
+                type: 'alphabeticalByName',
+                size: 500,
+              );
+            }
             break;
           case AlbumCollectionType.custom:
             albums = widget.initialAlbums ?? [];
@@ -145,15 +176,145 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
       _filteredAlbums = null;
       return;
     }
-    if (query.trim().isEmpty) {
-      _filteredAlbums = List.from(_albums!);
+    final q = query.trim().toLowerCase();
+    _filteredAlbums = _albums!.where((album) {
+      final matchesSearch = q.isEmpty ||
+          album.name.toLowerCase().contains(q) ||
+          (album.artist?.toLowerCase().contains(q) ?? false);
+      final matchesGenre = _selectedGenre == null ||
+          album.genre?.toLowerCase() == _selectedGenre!.toLowerCase();
+      return matchesSearch && matchesGenre;
+    }).toList();
+  }
+
+  List<String> get _availableGenres {
+    final values = (_albums ?? const <Album>[])
+        .map((album) => album.genre?.trim())
+        .whereType<String>()
+        .where((genre) => genre.isNotEmpty)
+        .toSet()
+        .toList();
+    values.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+
+  void _toggleSelection(Album album) {
+    setState(() {
+      _selecting = true;
+      if (!_selectedAlbumIds.add(album.id)) {
+        _selectedAlbumIds.remove(album.id);
+      }
+    });
+  }
+
+  void _startSelection(Album album) {
+    setState(() {
+      _selecting = true;
+      _selectedAlbumIds.add(album.id);
+    });
+  }
+
+  void _exitSelection() {
+    setState(() {
+      _selecting = false;
+      _selectedAlbumIds.clear();
+    });
+  }
+
+  void _closeSelection() {
+    if (widget.startInSelectionMode) {
+      Navigator.pop(context);
     } else {
-      final q = query.toLowerCase();
-      _filteredAlbums = _albums!.where((a) {
-        return a.name.toLowerCase().contains(q) ||
-            (a.artist?.toLowerCase().contains(q) ?? false);
-      }).toList();
+      _exitSelection();
     }
+  }
+
+  Future<void> _addSelectedToCollection() async {
+    final collectionId = await showAddAlbumsToCollectionSheet(
+      context,
+      _selectedAlbumIds,
+    );
+    if (collectionId == null || !mounted) return;
+    final collection =
+        context.read<AlbumCollectionService>().byId(collectionId);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Added to ${collection?.name ?? 'collection'}')),
+    );
+    if (widget.startInSelectionMode) {
+      Navigator.pop(context);
+    } else {
+      _exitSelection();
+    }
+  }
+
+  void _onPointerDown(PointerDownEvent event) {
+    _pointerPositions[event.pointer] = event.position;
+    if (_pointerPositions.length >= 2) _selectAlbumsUnderPointers();
+  }
+
+  void _onPointerMove(PointerMoveEvent event) {
+    if (!_pointerPositions.containsKey(event.pointer)) return;
+    _pointerPositions[event.pointer] = event.position;
+    if (_pointerPositions.length >= 2) _selectAlbumsUnderPointers();
+  }
+
+  void _onPointerUp(PointerEvent event) {
+    _pointerPositions.remove(event.pointer);
+  }
+
+  void _selectAlbumsUnderPointers() {
+    final newlySelected = <String>{};
+    for (final position in _pointerPositions.values) {
+      for (final album in _filteredAlbums ?? const <Album>[]) {
+        final box = _albumKeys[album.id]?.currentContext?.findRenderObject();
+        if (box is! RenderBox || !box.hasSize) continue;
+        final rect = box.localToGlobal(Offset.zero) & box.size;
+        if (rect.contains(position)) newlySelected.add(album.id);
+      }
+    }
+    if (newlySelected.isEmpty && _selecting) return;
+    setState(() {
+      _selecting = true;
+      _selectedAlbumIds.addAll(newlySelected);
+    });
+  }
+
+  Future<void> _showGenreFilter() async {
+    final genres = _availableGenres;
+    final selected = await showModalBottomSheet<String?>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('Filter by genre',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            ),
+            ListTile(
+              title: const Text('All genres'),
+              trailing: _selectedGenre == null
+                  ? const Icon(CupertinoIcons.checkmark)
+                  : null,
+              onTap: () => Navigator.pop(sheetContext, ''),
+            ),
+            ...genres.map((genre) => ListTile(
+                  title: Text(genre),
+                  trailing: _selectedGenre == genre
+                      ? const Icon(CupertinoIcons.checkmark)
+                      : null,
+                  onTap: () => Navigator.pop(sheetContext, genre),
+                )),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    setState(() {
+      _selectedGenre = selected.isEmpty ? null : selected;
+      _applyFilter(_searchQuery);
+    });
   }
 
   String _getTitle(BuildContext context) {
@@ -182,51 +343,132 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
     final isDesktop = ScreenHelper.isDesktop(context);
 
     return Scaffold(
-      body: Stack(
-        children: [
-          RefreshIndicator(
-            onRefresh: _loadAlbums,
-            child: CustomScrollView(
-              controller: _scrollController,
-              physics: const AlwaysScrollableScrollPhysics(
-                parent: BouncingScrollPhysics(),
-              ),
-              slivers: [
-                SliverAppBar(
-                  pinned: true,
-                  expandedHeight: 140,
-                  flexibleSpace: FlexibleSpaceBar(
-                    title: Text(
-                      title,
-                      style: theme.appBarTheme.titleTextStyle ??
-                          const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                    ),
-                    titlePadding: EdgeInsets.only(
-                      left: isDesktop ? 64 : 52,
-                      bottom: 16,
+      body: Listener(
+        onPointerDown: _onPointerDown,
+        onPointerMove: _onPointerMove,
+        onPointerUp: _onPointerUp,
+        onPointerCancel: _onPointerUp,
+        child: Stack(
+          children: [
+            RefreshIndicator(
+              onRefresh: _loadAlbums,
+              child: CustomScrollView(
+                controller: _scrollController,
+                dragStartBehavior: DragStartBehavior.down,
+                physics: const AlwaysScrollableScrollPhysics(
+                  parent: ResponsiveBouncingScrollPhysics(),
+                ),
+                slivers: [
+                  SliverAppBar(
+                    pinned: true,
+                    expandedHeight: 140,
+                    leading: _selecting
+                        ? IconButton(
+                            tooltip: widget.startInSelectionMode
+                                ? 'Back to collection'
+                                : 'Cancel selection',
+                            onPressed: _closeSelection,
+                            icon: const Icon(CupertinoIcons.clear),
+                          )
+                        : null,
+                    actions: _selecting
+                        ? [
+                            IconButton(
+                              tooltip: 'Select all',
+                              onPressed: () => setState(() {
+                                _selectedAlbumIds.addAll(
+                                  (_filteredAlbums ?? const <Album>[])
+                                      .map((album) => album.id),
+                                );
+                              }),
+                              icon: const Icon(
+                                  CupertinoIcons.checkmark_alt_circle),
+                            ),
+                            IconButton(
+                              tooltip: 'Add to collection',
+                              onPressed: _selectedAlbumIds.isEmpty
+                                  ? null
+                                  : _addSelectedToCollection,
+                              icon: const Icon(
+                                  CupertinoIcons.square_stack_3d_up_fill),
+                            ),
+                          ]
+                        : [
+                            IconButton(
+                              tooltip: 'Filter by genre',
+                              onPressed: _showGenreFilter,
+                              icon: Icon(_selectedGenre == null
+                                  ? CupertinoIcons.slider_horizontal_3
+                                  : CupertinoIcons.slider_horizontal_3),
+                            ),
+                          ],
+                    flexibleSpace: FlexibleSpaceBar(
+                      title: Text(
+                        _selecting
+                            ? '${_selectedAlbumIds.length} selected'
+                            : title,
+                        style: theme.appBarTheme.titleTextStyle ??
+                            const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      titlePadding: EdgeInsets.only(
+                        left: isDesktop ? 64 : 52,
+                        bottom: 16,
+                      ),
                     ),
                   ),
-                ),
-                if (_isLoading)
-                  _buildLoadingGrid(context)
-                else if (_error != null)
-                  _buildErrorState(theme)
-                else if (_filteredAlbums == null || _filteredAlbums!.isEmpty)
-                  _buildEmptyState(theme)
-                else
-                  _buildAlbumGrid(context),
-                const SliverToBoxAdapter(child: SizedBox(height: 100)),
-              ],
+                  if (!_isLoading && _error == null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+                        child: Column(
+                          children: [
+                            CupertinoSearchTextField(
+                              controller: _searchController,
+                              placeholder: 'Search albums or artists',
+                              onChanged: (value) => setState(() {
+                                _applyFilter(value);
+                              }),
+                            ),
+                            if (_selectedGenre != null) ...[
+                              const SizedBox(height: 8),
+                              Align(
+                                alignment: Alignment.centerLeft,
+                                child: InputChip(
+                                  label: Text(_selectedGenre!),
+                                  avatar: const Icon(CupertinoIcons.music_note,
+                                      size: 16),
+                                  onDeleted: () => setState(() {
+                                    _selectedGenre = null;
+                                    _applyFilter(_searchQuery);
+                                  }),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (_isLoading)
+                    _buildLoadingGrid(context)
+                  else if (_error != null)
+                    _buildErrorState(theme)
+                  else if (_filteredAlbums == null || _filteredAlbums!.isEmpty)
+                    _buildEmptyState(theme)
+                  else
+                    _buildAlbumGrid(context),
+                  const SliverToBoxAdapter(child: SizedBox(height: 100)),
+                ],
+              ),
             ),
-          ),
-          if (!_isLoading &&
-              _filteredAlbums != null &&
-              _filteredAlbums!.length >= 8)
-            _buildAlphabetSidebar(context),
-        ],
+            if (!_isLoading &&
+                _filteredAlbums != null &&
+                _filteredAlbums!.length >= 8)
+              _buildAlphabetSidebar(context),
+          ],
+        ),
       ),
     );
   }
@@ -319,16 +561,24 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
           (context, index) {
             final album = albums[index];
             return AlbumCard(
+              key: _albumKeys.putIfAbsent(album.id, GlobalKey.new),
               album: album,
               size: double.infinity,
+              selectionMode: _selecting,
+              selected: _selectedAlbumIds.contains(album.id),
               onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (context) => AlbumScreen(albumId: album.id),
-                  ),
-                );
+                if (_selecting) {
+                  _toggleSelection(album);
+                } else {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => AlbumScreen(albumId: album.id),
+                    ),
+                  );
+                }
               },
+              onLongPress: () => _startSelection(album),
             );
           },
           childCount: albums.length,
@@ -339,10 +589,7 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
 
   int _getColumnCount(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
-    if (width > 1200) return 6;
-    if (width > 900) return 5;
-    if (width > 600) return 3;
-    return 2;
+    return AlbumGridLayout.columns(context, width);
   }
 
   void _scrollToLetter(String letter) {
@@ -371,17 +618,15 @@ class _AlbumCollectionScreenState extends State<AlbumCollectionScreen> {
         0.0,
         _scrollController.position.maxScrollExtent,
       );
-      _scrollController.animateTo(
-        targetOffset,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOutCubic,
-      );
+      _scrollController.jumpTo(targetOffset);
     }
   }
 
   Widget _buildAlphabetSidebar(BuildContext context) {
-    final alphabet = List.generate(26, (i) => String.fromCharCode(65 + i))
-      ..add('#');
+    final alphabet = <String>[
+      '#',
+      ...List.generate(26, (i) => String.fromCharCode(65 + i)),
+    ];
 
     return Positioned(
       right: 4,

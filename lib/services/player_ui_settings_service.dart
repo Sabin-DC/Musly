@@ -17,6 +17,7 @@ class PlayerUiSettingsService {
   static const String _keyLyricsGlowEffect = 'lyrics_glow_effect';
   static const String _keyShowLiveLyricUnderArtwork =
       'player_show_live_lyric_under_artwork';
+  static const String _keyAlbumGridSize = 'album_grid_size';
 
   static final PlayerUiSettingsService _instance =
       PlayerUiSettingsService._internal();
@@ -46,6 +47,7 @@ class PlayerUiSettingsService {
   final ValueNotifier<bool> lyricsGlowEffectNotifier = ValueNotifier(true);
   final ValueNotifier<bool> showLiveLyricUnderArtworkNotifier =
       ValueNotifier(false);
+  final ValueNotifier<String> albumGridSizeNotifier = ValueNotifier('normal');
 
   Future<void> initialize() async {
     _prefs ??= await SharedPreferences.getInstance();
@@ -63,6 +65,7 @@ class PlayerUiSettingsService {
     lyricsAlignmentNotifier.value = getLyricsAlignment();
     lyricsGlowEffectNotifier.value = getLyricsGlowEffect();
     showLiveLyricUnderArtworkNotifier.value = getShowLiveLyricUnderArtwork();
+    albumGridSizeNotifier.value = getAlbumGridSize();
   }
 
   Future<void> setShowLiveLyricUnderArtwork(bool show) async {
@@ -73,6 +76,18 @@ class PlayerUiSettingsService {
 
   bool getShowLiveLyricUnderArtwork() {
     return _prefs?.getBool(_keyShowLiveLyricUnderArtwork) ?? false;
+  }
+
+  Future<void> setAlbumGridSize(String size) async {
+    final normalized = size == 'large' ? 'large' : 'normal';
+    await initialize();
+    await _prefs!.setString(_keyAlbumGridSize, normalized);
+    albumGridSizeNotifier.value = normalized;
+  }
+
+  String getAlbumGridSize() {
+    final value = _prefs?.getString(_keyAlbumGridSize);
+    return value == 'large' ? 'large' : 'normal';
   }
 
   Future<void> setShowVolumeSlider(bool show) async {
@@ -218,5 +233,7 @@ class PlayerUiSettingsService {
     lyricsBlurUnfocusedNotifier.dispose();
     lyricsAlignmentNotifier.dispose();
     lyricsGlowEffectNotifier.dispose();
+    showLiveLyricUnderArtworkNotifier.dispose();
+    albumGridSizeNotifier.dispose();
   }
 }

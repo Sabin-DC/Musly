@@ -15,6 +15,7 @@ export 'main/library_screen.dart';
 export 'main/library_search_delegate.dart';
 
 export 'media/album_collection_screen.dart';
+export 'media/collections_screen.dart';
 export 'media/song_collection_screen.dart';
 export 'media/favorites_screen.dart';
 export 'media/downloads_screen.dart';

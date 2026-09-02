@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:provider/provider.dart';
 import '../../l10n/app_localizations.dart';
 import '../../models/models.dart';
@@ -8,6 +9,7 @@ import '../../services/recommendation_service.dart';
 import '../../services/subsonic_service.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
+import '../../utils/responsive_scroll_physics.dart';
 import '../../widgets/widgets.dart';
 
 enum SongCollectionType {
@@ -259,8 +261,9 @@ class _SongCollectionScreenState extends State<SongCollectionScreen> {
       body: RefreshIndicator(
         onRefresh: _loadSongs,
         child: CustomScrollView(
+          dragStartBehavior: DragStartBehavior.down,
           physics: const AlwaysScrollableScrollPhysics(
-            parent: BouncingScrollPhysics(),
+            parent: ResponsiveBouncingScrollPhysics(),
           ),
           slivers: [
             SliverAppBar(

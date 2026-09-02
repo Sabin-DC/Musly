@@ -83,6 +83,7 @@ Widget createTestApp({
   PlayerProvider? playerProvider,
   LibraryProvider? libraryProvider,
   AuthProvider? authProvider,
+  AlbumCollectionService? albumCollectionService,
 }) {
   final service = subsonicService ?? SubsonicService();
   final storage = storageService ?? StorageService();
@@ -106,7 +107,11 @@ Widget createTestApp({
                 MuslyAudioHandler(), JukeboxService(), TranscodingService()),
       ),
       ChangeNotifierProvider<LibraryProvider>(
-        create: (_) => libraryProvider ?? LibraryProvider(service, MuslyAudioHandler()),
+        create: (_) =>
+            libraryProvider ?? LibraryProvider(service, MuslyAudioHandler()),
+      ),
+      ChangeNotifierProvider<AlbumCollectionService>(
+        create: (_) => albumCollectionService ?? AlbumCollectionService(),
       ),
       ChangeNotifierProvider<TranscodingService>(
           create: (_) => TranscodingService()),

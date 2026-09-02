@@ -37,6 +37,7 @@ class _SettingsDisplayTabState extends State<SettingsDisplayTab> {
   bool _lyricsBlurUnfocused = false;
   String _lyricsAlignment = 'left';
   bool _lyricsGlowEffect = true;
+  String _albumGridSize = 'normal';
   bool _hideWindowTitlebar = false;
 
   ThemeMode _themeMode = ThemeMode.system;
@@ -51,6 +52,10 @@ class _SettingsDisplayTabState extends State<SettingsDisplayTab> {
   @override
   void initState() {
     super.initState();
+    // The service is initialized during app startup. Reading this here avoids
+    // briefly rendering the default "Normal" state before the saved choice is
+    // loaded asynchronously.
+    _albumGridSize = _playerUiSettings.getAlbumGridSize();
     _loadSettings();
   }
 
@@ -72,6 +77,7 @@ class _SettingsDisplayTabState extends State<SettingsDisplayTab> {
       _lyricsBlurUnfocused = _playerUiSettings.getLyricsBlurUnfocused();
       _lyricsAlignment = _playerUiSettings.getLyricsAlignment();
       _lyricsGlowEffect = _playerUiSettings.getLyricsGlowEffect();
+      _albumGridSize = _playerUiSettings.getAlbumGridSize();
       _themeMode = themeService.themeMode;
       _accentColor = themeService.accentColor;
       _liquidGlass = themeService.liquidGlass;
@@ -205,6 +211,56 @@ class _SettingsDisplayTabState extends State<SettingsDisplayTab> {
                 setState(() => _accentColor = color);
                 await themeService.setAccentColor(color);
               },
+            ),
+          ),
+          const SizedBox(height: 20),
+          _buildEditorRow(
+            icon: CupertinoIcons.square_grid_2x2,
+            iconColor: const Color(0xFF34C759),
+            label: 'Album grid size',
+            child: Row(
+              children: [
+                for (final option in const [
+                  ('normal', 'Normal'),
+                  ('large', 'Large'),
+                ])
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.only(
+                        right: option.$1 == 'normal' ? 8 : 0,
+                      ),
+                      child: GestureDetector(
+                        onTap: () async {
+                          setState(() => _albumGridSize = option.$1);
+                          await _playerUiSettings.setAlbumGridSize(option.$1);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: _albumGridSize == option.$1
+                                ? Theme.of(context).colorScheme.primary
+                                : (isDark
+                                    ? Colors.white.withValues(alpha: 0.08)
+                                    : Colors.black.withValues(alpha: 0.06)),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            option.$2,
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: _albumGridSize == option.$1
+                                  ? Colors.white
+                                  : (isDark ? Colors.white70 : Colors.black54),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
           if (!_isDesktop) ...[

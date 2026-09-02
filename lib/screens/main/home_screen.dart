@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:provider/provider.dart';
 import 'package:musly/models/models.dart';
@@ -8,14 +9,17 @@ import 'package:musly/providers/player_provider.dart';
 import 'package:musly/providers/auth_provider.dart';
 import 'package:musly/services/subsonic_service.dart';
 import 'package:musly/services/recommendation_service.dart';
+import 'package:musly/services/album_collection_service.dart';
 import 'package:musly/services/offline_service.dart';
 import 'package:musly/theme/app_theme.dart';
 import 'package:musly/utils/navigation_helper.dart';
+import 'package:musly/utils/responsive_scroll_physics.dart';
 import 'package:musly/widgets/widgets.dart';
 import 'package:musly/screens/detail/album_screen.dart';
 import 'package:musly/screens/detail/playlist_screen.dart';
 import 'package:musly/screens/detail/artist_screen.dart';
 import 'package:musly/screens/media/song_collection_screen.dart';
+import 'package:musly/screens/media/collections_screen.dart';
 import 'package:musly/screens/media/favorites_screen.dart';
 import 'package:musly/screens/settings/settings_screen.dart';
 import 'package:musly/screens/wrapped/wrapped_screen.dart';
@@ -98,8 +102,10 @@ class _HomeScreenState extends State<HomeScreen> {
           await libraryProvider.refresh();
         },
         child: CustomScrollView(
+          dragStartBehavior: DragStartBehavior.down,
           physics: const AlwaysScrollableScrollPhysics(
-              parent: BouncingScrollPhysics()),
+            parent: ResponsiveBouncingScrollPhysics(),
+          ),
           slivers: [
             SliverAppBar(
               automaticallyImplyLeading: false,
@@ -162,12 +168,14 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         _buildCategoryChip('All', 'All', isDark),
                         const SizedBox(width: 8),
-                        _buildCategoryChip('Music', 'Music', isDark),
+                        _buildCategoryChip(
+                            'Collections', 'Collections', isDark),
+                        const SizedBox(width: 8),
+                        _buildCategoryChip('Playlists', 'Playlists', isDark),
                         const SizedBox(width: 8),
                         _buildCategoryChip(
                             'MadeForYou', 'Made For You', isDark),
-                        const SizedBox(width: 8),
-                        _buildCategoryChip('Playlists', 'Playlists', isDark),
+                        // _buildCategoryChip('Music', 'Music', isDark),
                       ],
                     ),
                   ),
@@ -175,8 +183,10 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             SliverToBoxAdapter(
-              child: Consumer2<LibraryProvider, RecommendationService>(
-                builder: (context, libraryProvider, recommendationService, _) {
+              child: Consumer3<LibraryProvider, RecommendationService,
+                  AlbumCollectionService>(
+                builder: (context, libraryProvider, recommendationService,
+                    collectionService, _) {
                   if (libraryProvider.isLoading &&
                       !libraryProvider.isInitialized) {
                     return _buildLoadingState(isDesktop, hPad);
@@ -215,6 +225,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   var recentAlbums = libraryProvider.recentAlbums;
                   var playlists = libraryProvider.playlists;
                   var artists = libraryProvider.artists;
+                  final collections = collectionService.collections;
 
                   if (artists.isEmpty && recommendationService.enabled) {
                     final topNames =
@@ -280,6 +291,37 @@ class _HomeScreenState extends State<HomeScreen> {
                         if (!isDesktop && WrappedService.isWrappedSeason()) ...[
                           _buildWrappedBanner(context, hPad, isDesktop),
                           const SizedBox(height: 12),
+                        ],
+                        if ((_selectedCategory == 'All' ||
+                                _selectedCategory == 'Collections') &&
+                            collections.isNotEmpty) ...[
+                          HorizontalScrollSection(
+                            title: 'Collections',
+                            padding: EdgeInsets.symmetric(horizontal: hPad),
+                            cardSize: isDesktop ? 180 : 155,
+                            children: collections.take(12).map((collection) {
+                              final albums = resolveCollectionAlbums(
+                                collection,
+                                libraryProvider.cachedAllAlbums,
+                              );
+                              return MediaCard(
+                                title: collection.name,
+                                subtitle:
+                                    '${albums.length} ${albums.length == 1 ? 'album' : 'albums'}',
+                                coverArt: albums.isEmpty
+                                    ? null
+                                    : albums.first.coverArt,
+                                size: isDesktop ? 180 : 155,
+                                onTap: () => NavigationHelper.push(
+                                  context,
+                                  CollectionDetailScreen(
+                                    collectionId: collection.id,
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 28),
                         ],
                         if (_selectedCategory == 'All' ||
                             _selectedCategory == 'Music') ...[

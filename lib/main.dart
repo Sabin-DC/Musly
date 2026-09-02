@@ -29,6 +29,7 @@ import 'screens/screens.dart';
 import 'package:dynamic_color/dynamic_color.dart';
 import 'theme/theme.dart';
 import 'utils/image_cache.dart';
+import 'utils/responsive_scroll_physics.dart';
 
 class AppScrollBehavior extends MaterialScrollBehavior {
   @override
@@ -37,6 +38,16 @@ class AppScrollBehavior extends MaterialScrollBehavior {
         PointerDeviceKind.mouse,
         PointerDeviceKind.trackpad,
       };
+
+  @override
+  ScrollPhysics getScrollPhysics(BuildContext context) {
+    if (getPlatform(context) == TargetPlatform.iOS) {
+      return const ResponsiveBouncingScrollPhysics(
+        parent: RangeMaintainingScrollPhysics(),
+      );
+    }
+    return super.getScrollPhysics(context);
+  }
 }
 
 Future<void> _showPrivacyPolicyIfNeeded() async {
@@ -196,6 +207,7 @@ void main() async {
   final upnpService = UpnpService();
   final jukeboxService = JukeboxService();
   final themeService = ThemeService();
+  final albumCollectionService = AlbumCollectionService();
 
   BpmAnalyzerService().initialize().catchError((e) {
     debugPrint('Failed to initialize BPM analyzer: $e');
@@ -214,6 +226,9 @@ void main() async {
   });
   await themeService.initialize().catchError((e) {
     debugPrint('Failed to initialize theme service: $e');
+  });
+  await albumCollectionService.initialize().catchError((e) {
+    debugPrint('Failed to initialize album collections: $e');
   });
   jukeboxService.initialize().catchError((e) {
     debugPrint('Failed to initialize jukebox service: $e');
@@ -289,6 +304,9 @@ void main() async {
           value: tvDetectionService),
       ChangeNotifierProvider<PlayerProvider>.value(value: playerProvider),
       ChangeNotifierProvider<LibraryProvider>.value(value: libraryProvider),
+      ChangeNotifierProvider<AlbumCollectionService>.value(
+        value: albumCollectionService,
+      ),
     ],
     child: const MuslyApp(),
   );

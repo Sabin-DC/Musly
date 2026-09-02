@@ -49,6 +49,16 @@ class ImageUrlCache {
 
 typedef _ImageUrlCache = ImageUrlCache;
 
+@visibleForTesting
+int resolveArtworkCacheSize(double logicalSize, double devicePixelRatio) {
+  final physicalSize = (logicalSize * devicePixelRatio).ceil();
+  const buckets = <int>[128, 256, 512, 768, 1024, 1200];
+  return buckets.firstWhere(
+    (size) => size >= physicalSize,
+    orElse: () => buckets.last,
+  );
+}
+
 class AlbumArtwork extends StatelessWidget {
   final String? coverArt;
   final double size;
@@ -82,11 +92,21 @@ class AlbumArtwork extends StatelessWidget {
                 ? 0.0
                 : globalRadius);
 
-    return _buildContent(
-      context,
-      resolvedRadius,
-      shadowLevel,
-      shadowColor,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final validSize = size.isFinite && !size.isNaN
+            ? size
+            : constraints.maxWidth.isFinite
+                ? constraints.maxWidth
+                : 150.0;
+        return _buildContent(
+          context,
+          resolvedRadius,
+          shadowLevel,
+          shadowColor,
+          validSize,
+        );
+      },
     );
   }
 
@@ -95,6 +115,7 @@ class AlbumArtwork extends StatelessWidget {
     double resolvedRadius,
     String shadowLevel,
     String shadowColor,
+    double artworkSize,
     bool isDark,
   ) {
     if (shadow != null) return shadow;
@@ -113,18 +134,18 @@ class AlbumArtwork extends StatelessWidget {
     switch (shadowLevel) {
       case 'medium':
         opacity = isDark ? 0.35 : 0.25;
-        blur = size / 6;
-        offset = Offset(0, size / 20);
+        blur = artworkSize / 6;
+        offset = Offset(0, artworkSize / 20);
         break;
       case 'strong':
         opacity = isDark ? 0.55 : 0.40;
-        blur = size / 4;
-        offset = Offset(0, size / 12);
+        blur = artworkSize / 4;
+        offset = Offset(0, artworkSize / 12);
         break;
       default:
         opacity = isDark ? 0.22 : 0.14;
-        blur = size / 10;
-        offset = Offset(0, size / 30);
+        blur = artworkSize / 10;
+        offset = Offset(0, artworkSize / 30);
     }
     return BoxShadow(
       color: color.withValues(alpha: opacity),
@@ -138,11 +159,10 @@ class AlbumArtwork extends StatelessWidget {
     double resolvedRadius,
     String shadowLevel,
     String shadowColor,
+    double validSize,
   ) {
-    final validSize = size.isFinite && !size.isNaN ? size : 150.0;
-
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    final cacheSize = (validSize * dpr).toInt().clamp(100, 600);
+    final cacheSize = resolveArtworkCacheSize(validSize, dpr);
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final resolvedShadow = _resolvedShadow(
@@ -150,6 +170,7 @@ class AlbumArtwork extends StatelessWidget {
       resolvedRadius,
       shadowLevel,
       shadowColor,
+      validSize,
       isDark,
     );
 
@@ -222,13 +243,13 @@ class AlbumArtwork extends StatelessWidget {
         if (imageUrl.isEmpty) return _buildPlaceholder(isDark);
         return CachedNetworkImage(
           imageUrl: imageUrl,
-          cacheKey: 'cover_natural_$coverArt',
-          key: ValueKey('cover_natural_$coverArt'),
+          cacheKey: 'cover_natural_${coverArt}_$cacheSize',
+          key: ValueKey('cover_natural_${coverArt}_$cacheSize'),
           fit: BoxFit.contain,
           memCacheWidth: cacheSize,
           memCacheHeight: cacheSize,
-          maxWidthDiskCache: cacheSize > 600 ? cacheSize : 600,
-          maxHeightDiskCache: cacheSize > 600 ? cacheSize : 600,
+          maxWidthDiskCache: cacheSize,
+          maxHeightDiskCache: cacheSize,
           fadeInDuration: Duration.zero,
           fadeOutDuration: Duration.zero,
           useOldImageOnUrlChange: true,
@@ -281,13 +302,13 @@ class AlbumArtwork extends StatelessWidget {
         if (imageUrl.isEmpty) return _buildPlaceholder(isDark);
         return CachedNetworkImage(
           imageUrl: imageUrl,
-          cacheKey: 'cover_$coverArt',
-          key: ValueKey('cover_$coverArt'),
+          cacheKey: 'cover_${coverArt}_$cacheSize',
+          key: ValueKey('cover_${coverArt}_$cacheSize'),
           fit: BoxFit.cover,
           memCacheWidth: cacheSize,
           memCacheHeight: cacheSize,
-          maxWidthDiskCache: cacheSize > 600 ? cacheSize : 600,
-          maxHeightDiskCache: cacheSize > 600 ? cacheSize : 600,
+          maxWidthDiskCache: cacheSize,
+          maxHeightDiskCache: cacheSize,
           fadeInDuration: Duration.zero,
           fadeOutDuration: Duration.zero,
           useOldImageOnUrlChange: true,
