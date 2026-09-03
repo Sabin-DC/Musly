@@ -84,6 +84,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? _resolvedArtworkUrl;
   String? _systemArtworkUrl;
 
+  // A collection shuffle deliberately keeps a small playable queue rather than
+  // constructing audio sources for every track in a potentially huge group.
+  final List<String> _dynamicShuffleAlbumIds = [];
+  final List<Song> _dynamicShufflePendingSongs = [];
+  bool _dynamicShuffleActive = false;
+  bool _dynamicShuffleRefilling = false;
+  bool _startingDynamicShuffle = false;
+  static const int _dynamicShuffleBufferSize = 8;
+
   RadioStation? _currentRadioStation;
   bool _isPlayingRadio = false;
   bool _isRadioQueue = false;
@@ -1828,6 +1837,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     int? startIndex,
     Duration? initialPosition,
   }) async {
+    if (!_startingDynamicShuffle) _clearDynamicShuffle();
     if (_currentSong?.id == song.id && !_isPlayingRadio) {
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
@@ -2170,6 +2180,84 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Starts a collection shuffle with one track, then lazily loads albums and
+  /// keeps only a short randomized buffer in the actual player queue.
+  Future<void> startDynamicAlbumShuffle(Iterable<String> albumIds) async {
+    final library = _libraryProvider;
+    if (library == null) return;
+    _clearDynamicShuffle();
+    final collectionAlbumIds = albumIds.where((id) => id.isNotEmpty).toSet();
+    final cachedSongs = library.cachedAllSongs
+        .where((song) => collectionAlbumIds.contains(song.albumId))
+        .toList();
+    _dynamicShufflePendingSongs.addAll(cachedSongs);
+    final cachedAlbumIds =
+        cachedSongs.map((song) => song.albumId).whereType<String>().toSet();
+    _dynamicShuffleAlbumIds.addAll(
+      collectionAlbumIds.where((id) => !cachedAlbumIds.contains(id)),
+    );
+    _dynamicShuffleAlbumIds.shuffle();
+    _dynamicShuffleActive = _dynamicShuffleAlbumIds.isNotEmpty ||
+        _dynamicShufflePendingSongs.isNotEmpty;
+    if (!_dynamicShuffleActive) return;
+
+    await _loadNextDynamicShuffleAlbum(library);
+    if (_dynamicShufflePendingSongs.isEmpty) return;
+    _dynamicShufflePendingSongs.shuffle();
+    final first = _dynamicShufflePendingSongs.removeLast();
+    _startingDynamicShuffle = true;
+    try {
+      await playSong(first, playlist: [first], startIndex: 0);
+    } finally {
+      _startingDynamicShuffle = false;
+    }
+    _refillDynamicShuffle().catchError((_) {});
+  }
+
+  void _clearDynamicShuffle() {
+    _dynamicShuffleActive = false;
+    _dynamicShuffleAlbumIds.clear();
+    _dynamicShufflePendingSongs.clear();
+  }
+
+  Future<void> _loadNextDynamicShuffleAlbum(LibraryProvider library) async {
+    while (_dynamicShuffleAlbumIds.isNotEmpty &&
+        _dynamicShufflePendingSongs.isEmpty) {
+      final albumId = _dynamicShuffleAlbumIds.removeLast();
+      final songs = await library.getAlbumSongs(albumId);
+      _dynamicShufflePendingSongs.addAll(songs);
+    }
+  }
+
+  Future<void> _refillDynamicShuffle() async {
+    if (!_dynamicShuffleActive || _dynamicShuffleRefilling) return;
+    final library = _libraryProvider;
+    if (library == null) return;
+    final remaining = _queue.length - _currentIndex - 1;
+    if (remaining >= _dynamicShuffleBufferSize) return;
+
+    _dynamicShuffleRefilling = true;
+    try {
+      final needed = _dynamicShuffleBufferSize - remaining;
+      final additions = <Song>[];
+      while (additions.length < needed) {
+        if (_dynamicShufflePendingSongs.isEmpty) {
+          await _loadNextDynamicShuffleAlbum(library);
+        }
+        if (_dynamicShufflePendingSongs.isEmpty) break;
+        _dynamicShufflePendingSongs.shuffle();
+        additions.add(_dynamicShufflePendingSongs.removeLast());
+      }
+      if (additions.isNotEmpty) await addAllToQueue(additions);
+      if (_dynamicShuffleAlbumIds.isEmpty &&
+          _dynamicShufflePendingSongs.isEmpty) {
+        _dynamicShuffleActive = false;
+      }
+    } finally {
+      _dynamicShuffleRefilling = false;
     }
   }
 
@@ -3106,6 +3194,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _resetScrobbleTracking(_currentSong!);
     notifyListeners();
     _saveQueueState();
+    _refillDynamicShuffle().catchError((_) {});
 
     if (_currentSong!.isLocal != true) {
       if (_offlineService.isOfflineMode) {

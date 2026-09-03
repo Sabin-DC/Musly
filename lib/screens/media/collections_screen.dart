@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -131,6 +133,7 @@ class CollectionDetailScreen extends StatefulWidget {
 class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
   bool _gridView = true;
   bool _selecting = false;
+  bool _isStartingShuffle = false;
   final Set<String> _selectedIds = {};
   final ScrollController _scrollController = ScrollController();
 
@@ -210,6 +213,22 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     );
   }
 
+  void _shufflePlayCollection(List<Album> albums) {
+    if (albums.isEmpty || _isStartingShuffle) return;
+    setState(() => _isStartingShuffle = true);
+    context
+        .read<PlayerProvider>()
+        .startDynamicAlbumShuffle(albums.map((album) => album.id))
+        .catchError((_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not start collection shuffle')),
+        );
+      }
+    });
+    setState(() => _isStartingShuffle = false);
+  }
+
   @override
   Widget build(BuildContext context) {
     final collection =
@@ -241,6 +260,19 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
                 ),
               ]
             : [
+                IconButton(
+                  tooltip: 'Shuffle collection',
+                  onPressed: albums.isEmpty || _isStartingShuffle
+                      ? null
+                      : () => _shufflePlayCollection(albums),
+                  icon: _isStartingShuffle
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(CupertinoIcons.shuffle),
+                ),
                 IconButton(
                   tooltip: _gridView ? 'List view' : 'Grid view',
                   onPressed: () => setState(() => _gridView = !_gridView),
