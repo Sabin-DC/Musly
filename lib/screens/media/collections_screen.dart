@@ -218,7 +218,7 @@ class _CollectionDetailScreenState extends State<CollectionDetailScreen> {
     setState(() => _isStartingShuffle = true);
     context
         .read<PlayerProvider>()
-        .startDynamicAlbumShuffle(albums.map((album) => album.id))
+        .startDynamicAlbumShuffle(albums)
         .catchError((_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -39,6 +40,8 @@ import '../providers/library_provider.dart';
 enum RepeatMode { off, all, one }
 
 class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
+  static const MethodChannel _remoteFeedbackChannel =
+      MethodChannel('com.devid.musly/remote_feedback');
   final SubsonicService _subsonicService;
   late final StorageService _storageService;
   final MuslyAudioHandler _audioHandler;
@@ -185,6 +188,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     } catch (_) {}
     _initializeAutoDj();
     _wireAudioHandlerCallbacks();
+    if (!kIsWeb && Platform.isIOS) {
+      _remoteFeedbackChannel.setMethodCallHandler((call) async {
+        if (call.method == 'toggleLike') await toggleFavorite();
+      });
+    }
 
     if (!kIsWeb &&
         (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
@@ -1031,6 +1039,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       artworkUrl: artworkUrl,
       duration: effectiveDuration,
     );
+    _syncIosFavoriteState();
 
     if (_isRenderingRemotely || _jukeboxService.enabled) {
       _audioHandler.updateRemotePlaybackState(
@@ -1836,9 +1845,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     List<Song>? playlist,
     int? startIndex,
     Duration? initialPosition,
+    bool forceNewQueue = false,
   }) async {
     if (!_startingDynamicShuffle) _clearDynamicShuffle();
-    if (_currentSong?.id == song.id && !_isPlayingRadio) {
+    if (!forceNewQueue && _currentSong?.id == song.id && !_isPlayingRadio) {
       if (initialPosition != null && initialPosition > Duration.zero) {
         await seek(initialPosition);
       }
@@ -2185,32 +2195,69 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// Starts a collection shuffle with one track, then lazily loads albums and
   /// keeps only a short randomized buffer in the actual player queue.
-  Future<void> startDynamicAlbumShuffle(Iterable<String> albumIds) async {
+  Future<void> startDynamicAlbumShuffle(Iterable<Album> albums) async {
     final library = _libraryProvider;
     if (library == null) return;
     _clearDynamicShuffle();
-    final collectionAlbumIds = albumIds.where((id) => id.isNotEmpty).toSet();
-    final cachedSongs = library.cachedAllSongs
-        .where((song) => collectionAlbumIds.contains(song.albumId))
-        .toList();
-    _dynamicShufflePendingSongs.addAll(cachedSongs);
-    final cachedAlbumIds =
-        cachedSongs.map((song) => song.albumId).whereType<String>().toSet();
+    final collectionAlbums = {
+      for (final album in albums)
+        if (album.id.isNotEmpty) album.id: album,
+    };
+    final cachedSongsByAlbum = <String, List<Song>>{};
+    for (final song in library.cachedAllSongs) {
+      final albumId = song.albumId;
+      if (albumId != null && collectionAlbums.containsKey(albumId)) {
+        (cachedSongsByAlbum[albumId] ??= []).add(song);
+      }
+    }
+
+    // A partial cached album must not be treated as complete: otherwise the
+    // lazy queue can exhaust its few cached tracks and have no album left to
+    // fetch. Server albums usually include songCount; local albums are known
+    // complete because their library scan is the source of the cache.
+    final completeCachedAlbumIds = <String>{};
+    for (final entry in collectionAlbums.entries) {
+      final album = entry.value;
+      final cachedSongs = cachedSongsByAlbum[entry.key] ?? const <Song>[];
+      final isComplete = album.isLocal ||
+          (album.songCount != null && cachedSongs.length >= album.songCount!);
+      if (isComplete) {
+        completeCachedAlbumIds.add(entry.key);
+        _dynamicShufflePendingSongs.addAll(cachedSongs);
+      }
+    }
     _dynamicShuffleAlbumIds.addAll(
-      collectionAlbumIds.where((id) => !cachedAlbumIds.contains(id)),
+      collectionAlbums.keys.where((id) => !completeCachedAlbumIds.contains(id)),
     );
     _dynamicShuffleAlbumIds.shuffle();
     _dynamicShuffleActive = _dynamicShuffleAlbumIds.isNotEmpty ||
         _dynamicShufflePendingSongs.isNotEmpty;
     if (!_dynamicShuffleActive) return;
 
-    await _loadNextDynamicShuffleAlbum(library);
-    if (_dynamicShufflePendingSongs.isEmpty) return;
-    _dynamicShufflePendingSongs.shuffle();
-    final first = _dynamicShufflePendingSongs.removeLast();
+    // Establish a small real queue before playback begins. This avoids a
+    // one-song queue when the first album happens to have just one track or a
+    // refill request is slower than playback startup.
+    final initialQueue = <Song>[];
+    while (initialQueue.length < _dynamicShuffleBufferSize) {
+      if (_dynamicShufflePendingSongs.isEmpty) {
+        await _loadNextDynamicShuffleAlbum(library);
+      }
+      if (_dynamicShufflePendingSongs.isEmpty) break;
+      _dynamicShufflePendingSongs.shuffle();
+      initialQueue.add(_dynamicShufflePendingSongs.removeLast());
+    }
+    if (initialQueue.isEmpty) {
+      _clearDynamicShuffle();
+      return;
+    }
     _startingDynamicShuffle = true;
     try {
-      await playSong(first, playlist: [first], startIndex: 0);
+      await playSong(
+        initialQueue.first,
+        playlist: initialQueue,
+        startIndex: 0,
+        forceNewQueue: true,
+      );
     } finally {
       _startingDynamicShuffle = false;
     }
@@ -3285,6 +3332,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     final newSong = _currentSong!.copyWith(starred: !isStarred);
     _currentSong = newSong;
     notifyListeners();
+    _syncIosFavoriteState();
 
     try {
       if (isStarred) {
@@ -3297,7 +3345,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       debugPrint('Error toggling favorite: $e');
       _currentSong = _currentSong!.copyWith(starred: isStarred);
       notifyListeners();
+      _syncIosFavoriteState();
     }
+  }
+
+  void _syncIosFavoriteState() {
+    if (kIsWeb || !Platform.isIOS) return;
+    _remoteFeedbackChannel.invokeMethod<void>('setLikeState', {
+      'active': _currentSong?.starred == true,
+    }).catchError((_) {});
   }
 
   Future<void> toggleFavoriteForSong(Song song) async {
@@ -3313,6 +3369,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (_currentSong?.id == song.id) {
         _currentSong = _currentSong!.copyWith(starred: !isStarred);
         notifyListeners();
+        _syncIosFavoriteState();
       }
     } catch (e) {
       debugPrint('Error toggling favorite for song: $e');
@@ -3363,6 +3420,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    if (!kIsWeb && Platform.isIOS) {
+      _remoteFeedbackChannel.setMethodCallHandler(null);
+    }
     WidgetsBinding.instance.removeObserver(this);
     _sleepTimer?.cancel();
     _sleepTimerFadeTimer?.cancel();
